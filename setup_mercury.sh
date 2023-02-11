@@ -20,7 +20,11 @@ function update_clone() {
   TAGBRANCH="${2}"
   GITDIR="${3}"
   WORKTREE="${4}"
-  git -C "${GITDIR}" worktree list || git clone --bare "${REPO}" "${GITDIR}"
+  if ! git -C "${GITDIR}" worktree list &> /dev/null
+  then
+    git clone -n "${REPO}" "${GITDIR}"
+    git -C "${GITDIR}" checkout --detach
+  fi
   if [[ ! -d "${WORKTREE}" ]]
   then
     git -C "${GITDIR}" worktree add "${WORKTREE}" "${TAGBRANCH}"

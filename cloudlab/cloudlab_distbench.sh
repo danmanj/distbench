@@ -290,7 +290,50 @@ then
 fi
 
 echo_purple "\\nFetching distbench source code..."
-fetch_or_update_git_repo
+function update_clone() {
+  if [[ $# != "4" ]]
+  then echo_purple "update_clone needs exactly 4 arguments to proceed"
+   return 1
+  fi
+  REPO="${1}"
+  TAGBRANCH="${2}"
+  GITDIR="${3}"
+  WORKTREE="${4}"
+  if ! git -C "${GITDIR}" worktree list &> /dev/null
+  then
+    git clone -n "${REPO}" "${GITDIR}"
+    git -C "${GITDIR}" checkout --detach
+  fi
+  if [[ ! -d "${WORKTREE}" ]]
+  then
+    git -C "${GITDIR}" worktree add "${WORKTREE}" "${TAGBRANCH}"
+  fi
+  pushd "${WORKTREE}"
+  # Make sure worktree does not contain uncommited modifications.
+  git diff --exit-code HEAD || (
+      echo_purple "There may be modifications to your worktree files."
+      echo_purple "Refusing to overwrite anything..."
+      return 1
+    )
+  # Make sure worktree is a commit that exists in a remote branch
+  if [[ -z "$(git branch -r --contains HEAD ; git tag --contains HEAD)" ]]
+  then
+    echo_purple "The local git worktree no longer matches anything upstream."
+    echo_purple "This probably means you made local changes and commited them."
+    echo_purple "Refusing to overwrite anything..."
+    return 2
+  fi
+  git fetch --all --tags
+  git reset --hard ${TAGBRANCH} --
+  popd
+}
+
+#fetch_or_update_git_repo
+  update_clone \
+    https://github.com/google/distbench.git \
+    ${GIT_BRANCH} \
+    ${PWD}/distbench_repo \
+    ${PWD}/distbench_source
 
 echo_purple "\\nChecking for working copy of bazel..."
 pushd distbench_source
