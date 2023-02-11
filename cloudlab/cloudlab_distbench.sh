@@ -235,7 +235,7 @@ function inner_fetch_or_update_git_repo() {
 
   cd distbench_source
   verify_repo_is_unmodified
-  git remote show origin | grep "${GIT_REPO}"
+  git remote show origin -n | grep "${GIT_REPO}"
   echo_purple "  distbench upstream repo name matches; safe to fetch..."
   git fetch --all
   OLD_BRANCH=$(git rev-parse --abbrev-ref HEAD)

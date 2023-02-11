@@ -12,18 +12,35 @@ DST_MERCURY=$(pwd)/opt/mercury-${MERCURY_VERSION}
 function echo_purple() { echo -e $(tput setaf 5)"$*"$(tput sgr0); }
 
 function update_clone() {
+  set -x
   if [[ $# != "4" ]]
-  then echo_purple "update_clone needs exactly 4 arguments to proceed"
+  then
+    echo_purple "update_clone needs exactly 4 arguments to proceed"
    return 1
   fi
-  REPO="${1}"
+  REMOTE_REPO="${1}"
   TAGBRANCH="${2}"
   GITDIR="${3}"
   WORKTREE="${4}"
-  if ! git -C "${GITDIR}" worktree list &> /dev/null
+  if [[ "$(git -C "${GITDIR}" remote get-url origin)" != "$REMOTE_REPO" ]]
   then
-    git clone -n "${REPO}" "${GITDIR}"
-    git -C "${GITDIR}" checkout --detach
+    if [[ -d "${GITDIR}" ]]
+    then
+      echo_purple "\\nLocal git repo may be corrupted!!!"
+      echo_purple "Refusing to overwrite anything..."
+      echo_purple "You might try running"
+      echo_purple "rm -rf $GITDIR"
+      echo_purple "and trying again if you are sure that this is safe."
+      return 1
+    fi
+    rm -rf "${GITDIR}"
+    mkdir -p "${GITDIR}"
+    git -C "${GITDIR}" init # --bare
+    git -C "${GITDIR}" remote add origin "${1}"
+    git -C "${GITDIR}" fetch --all --tags
+    git -C "${GITDIR}" worktree add "${WORKTREE}" "${TAGBRANCH}"
+    #git clone -n "${REMOTE_REPO}" "${GITDIR}"
+    #git -C "${GITDIR}" checkout --detach
   fi
   if [[ ! -d "${WORKTREE}" ]]
   then
@@ -34,7 +51,7 @@ function update_clone() {
   git diff --exit-code HEAD || (
       echo_purple "There may be modifications to your worktree files."
       echo_purple "Refusing to overwrite anything..."
-      return 1
+      return 2
     )
   # Make sure worktree is a commit that exists in a remote branch
   if [[ -z "$(git branch -r --contains HEAD ; git tag --contains HEAD)" ]]
@@ -42,7 +59,7 @@ function update_clone() {
     echo_purple "The local git worktree no longer matches anything upstream."
     echo_purple "This probably means you made local changes and commited them."
     echo_purple "Refusing to overwrite anything..."
-    return 2
+    return 3
   fi
   git fetch --all --tags
   git reset --hard ${TAGBRANCH}
@@ -51,11 +68,12 @@ function update_clone() {
 
 (
   VERSION_TAG=v${LIBFABRIC_VERSION}
-  LIBFABRIC_BUILD_DIR=${PWD}/libfabric-${LIBFABRIC_VERSION}
+  LIBFABRIC_REPO_DIR=${PWD}/libfabric_repo
+  LIBFABRIC_BUILD_DIR=${LIBFABRIC_REPO_DIR}/${LIBFABRIC_VERSION}
   update_clone \
     https://github.com/ofiwg/libfabric.git \
     ${VERSION_TAG} \
-    libfabric_repo \
+    ${PWD}/libfabric_repo \
     ${LIBFABRIC_BUILD_DIR}
   rm -rf ${DST_LIBFABRIC} opt/libfabric
   (
@@ -90,11 +108,12 @@ function update_clone() {
   fi
 
   VERSION_TAG=v${MERCURY_VERSION}
-  MERCURY_BUILD_DIR=${PWD}/mercury-${MERCURY_VERSION}
+  MERCURY_REPO_DIR=${PWD}/mercury_repo
+  MERCURY_BUILD_DIR=${MERCURY_REPO_DIR}/${MERCURY_VERSION}
   update_clone \
     https://github.com/mercury-hpc/mercury.git \
     ${VERSION_TAG} \
-    mercury_repo \
+    ${PWD}/mercury_repo \
     ${MERCURY_BUILD_DIR}
   rm -rf ${DST_MERCURY} opt/mercury
   (
