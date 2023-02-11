@@ -36,7 +36,7 @@ ProtocolDriverMercury::ProtocolDriverMercury() {}
 absl::Status ProtocolDriverMercury::Initialize(
     const ProtocolDriverOptions& pd_opts, int* port) {
   std::string netdev_name = pd_opts.netdev_name();
-  auto maybe_ip = IpAddressForDevice(netdev_name, 4);
+  auto maybe_ip = IpAddressForDevice(netdev_name, mercury_ipv4_only_ ? 4 : 0);
   if (!maybe_ip.ok()) return maybe_ip.status();
   server_ip_address_ = maybe_ip.value();
   server_socket_address_ = SocketAddressForIp(server_ip_address_, *port);
@@ -48,6 +48,10 @@ absl::Status ProtocolDriverMercury::Initialize(
   info_string = absl::StrReplaceAll(
       info_string, {{"__SERVER_IP__", server_socket_address_}});
   {
+    LOG(INFO) << "major " << HG_VERSION_MAJOR;
+    LOG(INFO) << "minor " << HG_VERSION_MINOR;
+    LOG(INFO) << "mercury_ipv4_only_ " << mercury_ipv4_only_;
+    LOG(INFO) << "using " << info_string;
     absl::MutexLock l(&mercury_init_mutex);
     hg_class_ = HG_Init(info_string.c_str(), /*listen=*/true);
   }
