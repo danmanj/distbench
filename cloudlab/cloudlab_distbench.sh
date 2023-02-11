@@ -62,7 +62,7 @@ DEFAULT_GIT_BRANCH=main
 set -uEeo pipefail
 shopt -s inherit_errexit
 
-function slowcat() { while read -N1 c; do sleep 0.003; echo -n "$c"; done; }
+function slowcat() { bash -c 'while read -N1 c; do sleep 0.003; echo -n "$c"; done'; }
 function echo_green() { echo -e $(tput setaf 2)"$*"$(tput sgr0) | slowcat;}
 function echo_red() { echo -e $(tput setaf 1)"$*"$(tput sgr0) | slowcat;}
 function clssh() { ssh -o 'StrictHostKeyChecking no' "${@}"; }
@@ -180,7 +180,7 @@ TRAFFIC_NETDEV="${7}"
 
 [[ $# == 7 ]]
 
-function slowcat() { while read -N1 c; do sleep 0.003; echo -n "$c"; done; }
+function slowcat() { bash -c 'while read -N1 c; do sleep 0.003; echo -n "$c"; done'; }
 function echo_red() { echo -e $(tput setaf 1)"$*"$(tput sgr0) | slowcat;}
 function echo_purple() { echo -e $(tput setaf 5)"$*"$(tput sgr0) | slowcat;}
 function echo_yellow() { echo -e $(tput setaf 3)"$*"$(tput sgr0) | slowcat;}
@@ -291,18 +291,73 @@ fi
 
 echo_purple "\\nFetching distbench source code..."
 function update_clone() {
+  set -x
   if [[ $# != "4" ]]
-  then echo_purple "update_clone needs exactly 4 arguments to proceed"
+  then
+    echo_purple "update_clone needs exactly 4 arguments to proceed"
    return 1
   fi
-  REPO="${1}"
+  REMOTE_URL="${1}"
   TAGBRANCH="${2}"
   GITDIR="${3}"
   WORKTREE="${4}"
-  if ! git -C "${GITDIR}" worktree list &> /dev/null
+  case "${GITDIR}" in
+    ${PWD}*)
+      echo_purple "update_clone output dir is within current dir :-)"
+      ;;
+    *)
+      echo_purple "Error: update_clone output dir must be within current dir"
+      return 2
+      ;;
+  esac
+  case "${WORKTREE}" in
+    ${GITDIR}*)
+      echo_purple "update_clone worktree dir is within GITDIR :-)"
+      ;;
+    *)
+      echo_purple "Error: update_clone worktree dir must be within GITDIR"
+      return 2
+      ;;
+  esac
+  TOP_LEVEL_URL="$(git remote get-url origin || true)"
+  if [[ "${TOP_LEVEL_URL}" == "${REMOTE_URL}" ]]
   then
-    git clone -n "${REPO}" "${GITDIR}"
-    git -C "${GITDIR}" checkout --detach
+    echo_purple "Error: looks like we are trying to nest a repo inside itself."
+    return 2
+  fi
+  OLD_URL="$(git -C "${GITDIR}" remote get-url origin || echo ${TOP_LEVEL_URL})"
+  if [[ "${OLD_URL}" != "$REMOTE_URL" ]]
+  then
+    if [[ -e "${GITDIR}" ]]
+    then
+      if [[ ! -d "${GITDIR}" ]]
+      then
+        echo_purple "Error: ${GITDIR} exists, and is not a directory"
+        return 3
+      fi
+      if [[ "${OLD_URL}" == "${TOP_LEVEL_URL}" ]]
+      then
+        echo_purple "\\nLocal git repo may be corrupted!!!"
+        echo_purple "Refusing to overwrite anything..."
+        echo_purple "You might try running"
+        echo_purple "rm -rf $GITDIR"
+        echo_purple "and trying again if you are sure that this is safe."
+        return 4
+      else
+        echo_purple "Looks like we are trying to switch to a new remote..."
+        ! git -C "${GITDIR}" remote remove old_origin
+        git -C "${GITDIR}" remote rename origin old_origin
+        #git -C "${GITDIR}" remote add origin "${REMOTE_URL}"
+      fi
+    fi
+    mkdir -p "${GITDIR}"
+    git -C "${GITDIR}" init # --bare
+    git -C "${GITDIR}" remote add origin "${REMOTE_URL}"
+    git -C "${GITDIR}" fetch origin --tags --force --prune
+    if [[ ! -d "${WORKTREE}" ]]
+    then
+    git -C "${GITDIR}" worktree add "${WORKTREE}" "${TAGBRANCH}"
+    fi
   fi
   if [[ ! -d "${WORKTREE}" ]]
   then
@@ -313,17 +368,20 @@ function update_clone() {
   git diff --exit-code HEAD || (
       echo_purple "There may be modifications to your worktree files."
       echo_purple "Refusing to overwrite anything..."
-      return 1
+      return 5
     )
-  # Make sure worktree is a commit that exists in a remote branch
+  # Make sure worktree is a commit that existed in a remote branch
+  # at the time of the last update. If a branch was force pushed we
+  # won't see the new value yet, but this is on purpose. If people are
+  # force pushing they must want to delete history here too.
   if [[ -z "$(git branch -r --contains HEAD ; git tag --contains HEAD)" ]]
   then
     echo_purple "The local git worktree no longer matches anything upstream."
     echo_purple "This probably means you made local changes and commited them."
     echo_purple "Refusing to overwrite anything..."
-    return 2
+    return 6
   fi
-  git fetch --all --tags
+  git -C "${GITDIR}" fetch origin --tags --force --prune
   git reset --hard ${TAGBRANCH} --
   popd
 }
@@ -333,7 +391,9 @@ function update_clone() {
     https://github.com/google/distbench.git \
     ${GIT_BRANCH} \
     ${PWD}/distbench_repo \
-    ${PWD}/distbench_source
+    ${PWD}/distbench_repo/build
+
+ln -sf ${PWD}/distbench_repo/build distbench_source
 
 echo_purple "\\nChecking for working copy of bazel..."
 pushd distbench_source

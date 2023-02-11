@@ -18,29 +18,67 @@ function update_clone() {
     echo_purple "update_clone needs exactly 4 arguments to proceed"
    return 1
   fi
-  REMOTE_REPO="${1}"
+  REMOTE_URL="${1}"
   TAGBRANCH="${2}"
   GITDIR="${3}"
   WORKTREE="${4}"
-  if [[ "$(git -C "${GITDIR}" remote get-url origin)" != "$REMOTE_REPO" ]]
+  case "${GITDIR}" in
+    ${PWD}*)
+      echo_purple "update_clone output dir is within current dir :-)"
+      ;;
+    *)
+      echo_purple "Error: update_clone output dir must be within current dir"
+      return 2
+      ;;
+  esac
+  case "${WORKTREE}" in
+    ${GITDIR}*)
+      echo_purple "update_clone worktree dir is within GITDIR :-)"
+      ;;
+    *)
+      echo_purple "Error: update_clone worktree dir must be within GITDIR"
+      return 2
+      ;;
+  esac
+  TOP_LEVEL_URL="$(git remote get-url origin || true)"
+  if [[ "${TOP_LEVEL_URL}" == "${REMOTE_URL}" ]]
   then
-    if [[ -d "${GITDIR}" ]]
+    echo_purple "Error: looks like we are trying to nest a repo inside itself."
+    return 2
+  fi
+  OLD_URL="$(git -C "${GITDIR}" remote get-url origin || echo ${TOP_LEVEL_URL})"
+  if [[ "${OLD_URL}" != "$REMOTE_URL" ]]
+  then
+    if [[ -e "${GITDIR}" ]]
     then
-      echo_purple "\\nLocal git repo may be corrupted!!!"
-      echo_purple "Refusing to overwrite anything..."
-      echo_purple "You might try running"
-      echo_purple "rm -rf $GITDIR"
-      echo_purple "and trying again if you are sure that this is safe."
-      return 1
+      if [[ ! -d "${GITDIR}" ]]
+      then
+        echo_purple "Error: ${GITDIR} exists, and is not a directory"
+        return 3
+      fi
+      if [[ "${OLD_URL}" == "${TOP_LEVEL_URL}" ]]
+      then
+        echo_purple "\\nLocal git repo may be corrupted!!!"
+        echo_purple "Refusing to overwrite anything..."
+        echo_purple "You might try running"
+        echo_purple "rm -rf $GITDIR"
+        echo_purple "and trying again if you are sure that this is safe."
+        return 4
+      else
+        echo_purple "Looks like we are trying to switch to a new remote..."
+        ! git -C "${GITDIR}" remote remove old_origin
+        git -C "${GITDIR}" remote rename origin old_origin
+        #git -C "${GITDIR}" remote add origin "${REMOTE_URL}"
+      fi
     fi
-    rm -rf "${GITDIR}"
     mkdir -p "${GITDIR}"
     git -C "${GITDIR}" init # --bare
-    git -C "${GITDIR}" remote add origin "${1}"
-    git -C "${GITDIR}" fetch --all --tags
+    git -C "${GITDIR}" remote add origin "${REMOTE_URL}"
+    git -C "${GITDIR}" fetch origin --tags --force --prune
+    if [[ ! -d "${WORKTREE}" ]]
+    then
     git -C "${GITDIR}" worktree add "${WORKTREE}" "${TAGBRANCH}"
-    #git clone -n "${REMOTE_REPO}" "${GITDIR}"
-    #git -C "${GITDIR}" checkout --detach
+    fi
   fi
   if [[ ! -d "${WORKTREE}" ]]
   then
@@ -51,18 +89,21 @@ function update_clone() {
   git diff --exit-code HEAD || (
       echo_purple "There may be modifications to your worktree files."
       echo_purple "Refusing to overwrite anything..."
-      return 2
+      return 5
     )
-  # Make sure worktree is a commit that exists in a remote branch
+  # Make sure worktree is a commit that existed in a remote branch
+  # at the time of the last update. If a branch was force pushed we
+  # won't see the new value yet, but this is on purpose. If people are
+  # force pushing they must want to delete history here too.
   if [[ -z "$(git branch -r --contains HEAD ; git tag --contains HEAD)" ]]
   then
     echo_purple "The local git worktree no longer matches anything upstream."
     echo_purple "This probably means you made local changes and commited them."
     echo_purple "Refusing to overwrite anything..."
-    return 3
+    return 6
   fi
-  git fetch --all --tags
-  git reset --hard ${TAGBRANCH}
+  git -C "${GITDIR}" fetch origin --tags --force --prune
+  git reset --hard ${TAGBRANCH} --
   popd
 }
 
@@ -73,7 +114,7 @@ function update_clone() {
   update_clone \
     https://github.com/ofiwg/libfabric.git \
     ${VERSION_TAG} \
-    ${PWD}/libfabric_repo \
+    ${LIBFABRIC_REPO_DIR} \
     ${LIBFABRIC_BUILD_DIR}
   rm -rf ${DST_LIBFABRIC} opt/libfabric
   (
@@ -113,7 +154,7 @@ function update_clone() {
   update_clone \
     https://github.com/mercury-hpc/mercury.git \
     ${VERSION_TAG} \
-    ${PWD}/mercury_repo \
+    ${MERCURY_REPO_DIR} \
     ${MERCURY_BUILD_DIR}
   rm -rf ${DST_MERCURY} opt/mercury
   (
